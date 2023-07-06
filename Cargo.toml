@@ -1,0 +1,38 @@
+[package]
+name = "tot"
+version = "0.1.0"
+edition = "2021"
+authors = ["Tim Yuen <timothy.yuen22@gmail.com>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["json", "yaml", "toml"]
+json = ["dep:serde_json"]
+yaml = ["dep:serde_yaml"]
+toml = ["dep:toml"]
+standalone = ["dep:clap", "dep:anyhow", "dep:env_logger"]
+
+[dependencies]
+# Parsing
+nom = "7.1"
+serde = "1.0"
+thiserror = "1.0"
+
+# Output
+serde_json = { version = "1.0", optional = true }
+serde_yaml = { version = "0.9", optional = true }
+toml = { version = "0.7", optional = true }
+
+# Standlone
+clap = { version = "4.3", features = ["derive"], optional = true }
+anyhow = { version = "1.0", optional = true }
+
+# Logging
+env_logger = { version = "0.10", optional = true }
+log = "0.4"
+
+[[bin]]
+name = "tot"
+path = "src/main.rs"
+required-features = ["standalone"]
