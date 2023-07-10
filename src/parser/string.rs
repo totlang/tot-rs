@@ -38,7 +38,7 @@ fn parse_escaped_whitespace(i: &str) -> PResult<&str> {
     preceded(char('\\'), multispace1)(i)
 }
 
-pub fn literal(i: &str) -> PResult<&str> {
+fn literal(i: &str) -> PResult<&str> {
     let not_quote_slash = is_not("\"\\");
 
     verify(not_quote_slash, |s: &str| !s.is_empty())(i)
@@ -60,7 +60,6 @@ fn parse_fragment<'a>(i: &'a str) -> PResult<StringFragment<'a>> {
 }
 
 pub fn parse_string(i: &str) -> PResult<String> {
-    println!("parse_string {i}");
     let build_string = fold_many0(parse_fragment, String::new, |mut string, fragment| {
         match fragment {
             StringFragment::Literal(v) => string.push_str(v),
