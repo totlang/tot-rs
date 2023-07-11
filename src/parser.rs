@@ -12,7 +12,7 @@ use nom::{
 };
 
 #[derive(thiserror::Error, Debug)]
-pub enum TotError {
+pub enum Error {
     #[error("error ocurred while parsing")]
     ParseError,
 }
@@ -112,7 +112,7 @@ fn key_value(i: &str) -> PResult<(String, TotValue)> {
     )(i)
 }
 
-pub fn parse(i: &str) -> Result<TotValue, TotError> {
+pub fn parse(i: &str) -> Result<TotValue, Error> {
     if let Ok((rem, v)) = dict_contents(i) {
         if rem.is_empty() {
             return Ok(v);
@@ -124,7 +124,7 @@ pub fn parse(i: &str) -> Result<TotValue, TotError> {
         }
     }
 
-    Err(TotError::ParseError)
+    Err(Error::ParseError)
 }
 
 #[cfg(test)]
