@@ -32,6 +32,9 @@ anyhow = { version = "1.0", optional = true }
 env_logger = { version = "0.10", optional = true }
 log = "0.4"
 
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"]}
+
 [[bin]]
 name = "tot"
 path = "src/main.rs"
