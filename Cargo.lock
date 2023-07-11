@@ -470,6 +470,7 @@ dependencies = [
  "env_logger",
  "log",
  "nom",
+ "ryu",
  "serde",
  "serde_json",
  "serde_yaml",

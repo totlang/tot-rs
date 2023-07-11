@@ -8,6 +8,8 @@ pub enum Error {
     SerdeError(String),
     #[error("parser error: {0}")]
     ParserError(crate::parser::Error),
+    #[error("io error: {0}")]
+    Io(std::io::Error),
 }
 
 impl serde::de::Error for Error {
