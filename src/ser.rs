@@ -11,7 +11,7 @@ const INDENT: &str = "    ";
 trait Formatter {
     fn indent(&mut self);
     fn unindent(&mut self);
-    fn get_indent(&self) -> u32;
+    fn get_indent(&self) -> usize;
 
     fn write_space<W: ?Sized + std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
         writer.write_all(b" ").map_err(Error::Io)
@@ -19,6 +19,18 @@ trait Formatter {
 
     fn write_newline<W: ?Sized + std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
         writer.write_all(b"\n").map_err(Error::Io)
+    }
+
+    fn write_indent<W: ?Sized + std::io::Write>(
+        &mut self,
+        writer: &mut W,
+        amount: Option<usize>,
+    ) -> Result<()> {
+        for _ in 1..amount.unwrap_or(self.get_indent()) {
+            writer.write_all(INDENT.as_bytes()).map_err(Error::Io)?;
+        }
+
+        Ok(())
     }
 
     #[inline]
@@ -69,9 +81,7 @@ trait Formatter {
 
     #[inline]
     fn write_key<W: ?Sized + std::io::Write>(&mut self, writer: &mut W, value: &str) -> Result<()> {
-        for _ in 0..self.get_indent() {
-            writer.write_all(INDENT.as_bytes()).map_err(Error::Io)?;
-        }
+        self.write_indent(writer, None)?;
         writer.write_all(value.as_bytes()).map_err(Error::Io)?;
         self.write_space(writer)
     }
@@ -79,10 +89,11 @@ trait Formatter {
     #[inline]
     fn begin_list<W: ?Sized + std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
         if self.get_indent() > 0 {
-            writer.write_all(b"[").map_err(Error::Io)?;
+            writer.write_all(b"[\n").map_err(Error::Io)?;
         }
         self.indent();
-        self.write_newline(writer)
+
+        Ok(())
     }
 
     #[inline]
@@ -91,9 +102,7 @@ trait Formatter {
 
         let indent = self.get_indent();
         if indent > 0 {
-            for _ in 0..self.get_indent() {
-                writer.write_all(INDENT.as_bytes()).map_err(Error::Io)?;
-            }
+            self.write_indent(writer, Some(indent))?;
             writer.write_all(b"]").map_err(Error::Io)
         } else {
             Ok(())
@@ -103,10 +112,11 @@ trait Formatter {
     #[inline]
     fn begin_dict<W: ?Sized + std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
         if self.get_indent() > 0 {
-            writer.write_all(b"{").map_err(Error::Io)?;
+            writer.write_all(b"{\n").map_err(Error::Io)?;
         }
         self.indent();
-        self.write_newline(writer)
+
+        Ok(())
     }
 
     #[inline]
@@ -115,10 +125,10 @@ trait Formatter {
 
         let indent = self.get_indent();
         if indent > 0 {
-            for _ in 0..self.get_indent() {
-                writer.write_all(INDENT.as_bytes()).map_err(Error::Io)?;
-            }
-            writer.write_all(b"}").map_err(Error::Io)
+            self.write_indent(writer, Some(indent))?;
+            writer.write_all(b"}").map_err(Error::Io)?;
+
+            Ok(())
         } else {
             Ok(())
         }
@@ -127,7 +137,8 @@ trait Formatter {
 
 #[derive(Debug, Default)]
 pub struct DefaultFormatter {
-    indents: u32,
+    indents: usize,
+    was_newline: bool,
 }
 
 impl Formatter for DefaultFormatter {
@@ -139,7 +150,7 @@ impl Formatter for DefaultFormatter {
         self.indents -= 1;
     }
 
-    fn get_indent(&self) -> u32 {
+    fn get_indent(&self) -> usize {
         self.indents
     }
 }
@@ -156,7 +167,7 @@ impl Formatter for CompactFormatter {
         // Intentionally blank
     }
 
-    fn get_indent(&self) -> u32 {
+    fn get_indent(&self) -> usize {
         0
     }
 }
@@ -167,10 +178,11 @@ pub struct KeySerializer<'a, W: 'a, F: 'a> {
 
 impl<'a, W: 'a, F: 'a> KeySerializer<'a, W, F> {
     fn new(ser: &'a mut Serializer<W, F>) -> Self {
-        Self { ser: ser }
+        Self { ser }
     }
 }
 
+// TODO unsupported ops need better errors
 impl<'a, W: std::io::Write, F: Formatter> ser::Serializer for KeySerializer<'a, W, F> {
     type Ok = ();
 
@@ -238,6 +250,7 @@ impl<'a, W: std::io::Write, F: Formatter> ser::Serializer for KeySerializer<'a, 
         self.ser.serialize_char(v)
     }
 
+    // TODO quote strings with spaces
     fn serialize_str(self, v: &str) -> Result<()> {
         self.ser.formatter.write_key(&mut self.ser.writer, v)
     }
@@ -303,7 +316,10 @@ impl<'a, W: std::io::Write, F: Formatter> ser::Serializer for KeySerializer<'a, 
         Err(Error::SerdeError("explode!".to_string()))
     }
 
-    fn serialize_tuple(self, len: usize) -> std::result::Result<Self::SerializeTuple, Self::Error> {
+    fn serialize_tuple(
+        self,
+        _len: usize,
+    ) -> std::result::Result<Self::SerializeTuple, Self::Error> {
         Err(Error::SerdeError("explode!".to_string()))
     }
 
@@ -493,8 +509,8 @@ impl<'a, W: std::io::Write, F: Formatter> ser::Serializer for &'a mut Serializer
         self.formatter.begin_dict(&mut self.writer)?;
         self.formatter.write_key(&mut self.writer, variant)?;
         value.serialize(&mut *self)?;
-        self.formatter.end_dict(&mut self.writer)?;
-        self.formatter.write_newline(&mut self.writer)
+        self.formatter.write_newline(&mut self.writer)?;
+        self.formatter.end_dict(&mut self.writer)
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq> {
@@ -569,6 +585,7 @@ impl<'a, W: std::io::Write, F: Formatter> ser::SerializeSeq for &'a mut Serializ
     where
         T: Serialize,
     {
+        self.formatter.write_indent(&mut self.writer, None)?;
         value.serialize(&mut **self)?;
         self.formatter.write_newline(&mut self.writer)
     }
@@ -650,6 +667,15 @@ impl<'a, W: std::io::Write, F: Formatter> ser::SerializeMap for &'a mut Serializ
         self.formatter.write_newline(&mut self.writer)
     }
 
+    fn serialize_entry<K: ?Sized, V: ?Sized>(&mut self, key: &K, value: &V) -> Result<()>
+    where
+        K: Serialize,
+        V: Serialize,
+    {
+        self.serialize_key(key)?;
+        ser::SerializeMap::serialize_value(self, value)
+    }
+
     fn end(self) -> Result<()> {
         self.formatter.end_dict(&mut self.writer)
     }
@@ -686,7 +712,8 @@ impl<'a, W: std::io::Write, F: Formatter> ser::SerializeStructVariant for &'a mu
         T: Serialize,
     {
         self.formatter.write_key(&mut self.writer, key)?;
-        value.serialize(&mut **self)
+        value.serialize(&mut **self)?;
+        self.formatter.write_newline(&mut self.writer)
     }
 
     fn end(self) -> Result<()> {
@@ -707,29 +734,113 @@ pub fn to_string<T: ?Sized + Serialize>(value: &T) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use serde::Serialize;
+    use std::collections::BTreeMap;
+
     #[test]
     fn test_struct() {
-        #[derive(serde::Serialize)]
-        struct Inner {
-            num: f64,
+        {
+            #[derive(Serialize)]
+            struct Inner {
+                num: f64,
+            }
+
+            #[derive(Serialize)]
+            struct TestStruct {
+                boolean: bool,
+                number: f64,
+                int_number: i64,
+                string: String,
+                inner: Inner,
+            }
+
+            let test_struct = TestStruct {
+                boolean: true,
+                number: 10.0,
+                int_number: 2,
+                string: "hello world!".to_string(),
+                inner: Inner { num: 10.1 },
+            };
+            let output = super::to_string(&test_struct).unwrap();
+
+            assert_eq!(output, "boolean true\nnumber 10.0\nint_number 2.0\nstring \"hello world!\"\ninner {\n    num 10.1\n}\n");
         }
+        {
+            #[derive(Serialize)]
+            struct Inner {
+                my_int: i32,
+                my_float: f32,
+            }
 
-        #[derive(serde::Serialize)]
-        struct TestStruct {
-            boolean: bool,
-            number: f64,
-            string: String,
-            inner: Inner,
+            #[derive(Serialize)]
+            struct TestStruct {
+                map: BTreeMap<String, String>, // NOTE: HashMap does not guarantee order while BTreeMap does
+                array: Vec<i32>,
+                inner: Inner,
+            }
+
+            let test_struct = TestStruct {
+                map: {
+                    let mut m = BTreeMap::new();
+                    m.insert("hello".to_string(), "world".to_string());
+                    m.insert("goodbye".to_string(), "bleh".to_string());
+                    m
+                },
+                array: vec![1, 2, 3],
+                inner: Inner {
+                    my_int: 100,
+                    my_float: 50.0,
+                },
+            };
+
+            let output = super::to_string(&test_struct).unwrap();
+
+            assert_eq!(output, "map {\n    goodbye \"bleh\"\n    hello \"world\"\n}\narray [\n    1.0\n    2.0\n    3.0\n]\ninner {\n    my_int 100.0\n    my_float 50.0\n}\n");
         }
+    }
 
-        let test_struct = TestStruct {
-            boolean: true,
-            number: 10.0,
-            string: "hello world!".to_string(),
-            inner: Inner { num: 10.1 },
-        };
-        let output = super::to_string(&test_struct).unwrap();
+    #[test]
+    fn test_enum() {
+        // {
+        //     #[derive(Serialize)]
+        //     enum TestEnum {
+        //         Unit,
+        //         Tuple(i32),
+        //         Struct { string: String, list: Vec<bool> },
+        //     }
 
-        assert_eq!(output, "asdf");
+        //     let test_enum = TestEnum::Unit;
+        //     let output = super::to_string(&test_enum).unwrap();
+
+        //     assert_eq!(output, "\"Unit\"");
+
+        //     let test_enum = TestEnum::Tuple(10);
+        //     let output = super::to_string(&test_enum).unwrap();
+
+        //     assert_eq!(output, "Tuple 10.0\n");
+
+        //     let test_enum = TestEnum::Struct {
+        //         string: "Hello".to_string(),
+        //         list: vec![true, false],
+        //     };
+        //     let output = super::to_string(&test_enum).unwrap();
+
+        //     assert_eq!(output, "Struct {\n    string \"Hello\"\n    list [\n        true\n        false\n    ]\n}\n");
+        // }
+        {
+            #[derive(Serialize)]
+            enum TupleEnum {
+                Num(i32),
+                Tuple((i32, i32)),
+            }
+
+            let mut map = BTreeMap::new();
+            map.insert("val1", TupleEnum::Num(10));
+            map.insert("val2", TupleEnum::Num(20));
+
+            let output = super::to_string(&map).unwrap();
+
+            assert_eq!(output, "val1");
+        }
     }
 }
