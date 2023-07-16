@@ -13,44 +13,50 @@ pub struct Deserializer<'de> {
 
 impl<'de> Deserializer<'de> {
     pub fn from_str(input: &'de str) -> Self {
-        Deserializer {
-            input: input,
-            offset: Cell::new(0),
-        }
+        let offset = Cell::new(0);
+
+        Deserializer { input, offset }
     }
 
-    fn offset(&self, i: &'de str) {
-        let offset = i.as_ptr() as usize - self.input.as_ptr() as usize;
-        self.offset.set(offset);
+    fn peek(&self) -> Result<char> {
+        self.input
+            .chars()
+            .next()
+            .ok_or(Error::SerdeError("eof".to_string()))
     }
 
-    fn data(&self) -> &str {
-        &self.input[self.offset.get()..]
-    }
-
-    fn parse_ws(&self) -> Result<()> {
+    fn parse_ws(&mut self) -> Result<()> {
         let (rem, _) =
-            parser::all_ignored(self.data()).map_err(|e| Error::SerdeError(e.to_string()))?;
+            parser::all_ignored(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
 
-        self.offset(rem);
+        self.input = rem;
 
         Ok(())
     }
 
-    fn parse_bool(&self) -> Result<bool> {
+    fn parse_bool(&mut self) -> Result<bool> {
         let (rem, par) =
-            parser::boolean(self.data()).map_err(|e| Error::SerdeError(e.to_string()))?;
+            parser::boolean(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
 
-        self.offset(rem);
+        self.input = rem;
 
         Ok(par)
     }
 
-    fn parse_number(&self) -> Result<f64> {
+    fn parse_number(&mut self) -> Result<f64> {
         let (rem, par) =
-            parser::number(self.data()).map_err(|e| Error::SerdeError(e.to_string()))?;
+            parser::number(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
 
-        self.offset(rem);
+        self.input = rem;
+
+        Ok(par)
+    }
+
+    fn parse_string(&mut self) -> Result<String> {
+        let (rem, par) =
+            parser::string(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
+
+        self.input = rem;
 
         Ok(par)
     }
@@ -72,173 +78,166 @@ where
 impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     type Error = Error;
 
-    fn deserialize_any<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        match self.peek()? {
+            't' | 'f' => self.deserialize_bool(visitor),
+            '0'..='9' | '-' => self.deserialize_f64(visitor),
+            '"' | '\'' => self.deserialize_str(visitor),
+            _ => Err(Error::SerdeError("Syntax".to_string())),
+        }
+    }
+
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_bool(self.parse_bool()?)
+    }
+
+    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_bool<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_i8<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_i16<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_i32<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_i64<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_u8<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_u16<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_u32<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_u64<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_f32<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_f64<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_str(self.parse_string()?.as_str())
+    }
+
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.parse_string()?)
+    }
+
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_char<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_str<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_string<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_bytes<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_unit_struct<V>(self, name: &'static str, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_byte_buf<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_newtype_struct<V>(self, name: &'static str, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_option<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_unit<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_unit_struct<V>(
-        self,
-        name: &'static str,
-        visitor: V,
-    ) -> std::result::Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_newtype_struct<V>(
-        self,
-        name: &'static str,
-        visitor: V,
-    ) -> std::result::Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_seq<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_tuple<V>(
-        self,
-        len: usize,
-        visitor: V,
-    ) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
@@ -250,14 +249,14 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         name: &'static str,
         len: usize,
         visitor: V,
-    ) -> std::result::Result<V::Value, Self::Error>
+    ) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_map<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
@@ -269,7 +268,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         name: &'static str,
         fields: &'static [&'static str],
         visitor: V,
-    ) -> std::result::Result<V::Value, Self::Error>
+    ) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
@@ -281,21 +280,21 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         name: &'static str,
         variants: &'static [&'static str],
         visitor: V,
-    ) -> std::result::Result<V::Value, Self::Error>
+    ) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_identifier<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_ignored_any<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
@@ -305,17 +304,30 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
 #[cfg(test)]
 mod tests {
-    use super::Deserializer;
+    use super::{from_str, Deserializer};
 
     fn de(i: &str) -> Deserializer {
         Deserializer::from_str(i)
     }
 
     #[test]
+    fn test_de_bool() {
+        assert_eq!(from_str::<bool>("true").unwrap(), true);
+    }
+
+    #[test]
+    fn test_de_string() {
+        assert_eq!(
+            from_str::<String>("\"hello world\"").unwrap(),
+            "hello world"
+        );
+    }
+
+    #[test]
     fn test_whitespace() {
         let input = "/*comment */ true //asdf";
 
-        let de = de(input);
+        let mut de = de(input);
 
         assert!(de.parse_bool().is_err());
 
@@ -326,13 +338,19 @@ mod tests {
 
     #[test]
     fn test_boolean() {
-        let de = de("true");
+        let mut de = de("true");
         assert_eq!(de.parse_bool().unwrap(), true);
     }
 
     #[test]
     fn test_number_float() {
-        let de = de("1.0");
+        let mut de = de("1.0");
         assert_eq!(de.parse_number().unwrap(), 1.0);
+    }
+
+    #[test]
+    fn test_string() {
+        let mut de = de("\"hello world\"");
+        assert_eq!(de.parse_string().unwrap(), "hello world");
     }
 }
