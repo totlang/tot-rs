@@ -18,6 +18,7 @@ standalone = ["dep:clap", "dep:anyhow", "dep:env_logger"]
 nom = "7.1"
 serde = "1.0"
 thiserror = "1.0"
+ryu = "1.0"
 
 # Output
 serde_json = { version = "1.0", optional = true }
@@ -31,6 +32,9 @@ anyhow = { version = "1.0", optional = true }
 # Logging
 env_logger = { version = "0.10", optional = true }
 log = "0.4"
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"]}
 
 [[bin]]
 name = "tot"
