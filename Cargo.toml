@@ -1,8 +1,15 @@
 [package]
 name = "tot"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
 authors = ["Tim Yuen <timothy.yuen22@gmail.com>"]
+categories = ["encoding", "parser-implementations", "config"]
+description = "Tot format serialization and deserialization"
+keywords = ["tot", "serde"]
+repository = "https://github.com/totlang/tot-rs"
+readme = "README.md"
+license = "MPL-2.0"
+documentation = "https://docs.rs/tot"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
