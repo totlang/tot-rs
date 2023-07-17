@@ -93,7 +93,7 @@ fn dict_contents(i: &str) -> PResult<TotValue> {
     map(many0(key_value), |v| TotValue::Dict(HashMap::from_iter(v)))(i)
 }
 
-fn key(i: &str) -> PResult<String> {
+pub(crate) fn key(i: &str) -> PResult<String> {
     alt((map(string, String::from), map(token, String::from)))(i)
 }
 

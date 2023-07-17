@@ -9,11 +9,12 @@ use crate::parser;
 #[derive(Debug)]
 pub struct Deserializer<'de> {
     input: &'de str,
+    depth: u64,
 }
 
 impl<'de> Deserializer<'de> {
     pub fn from_str(input: &'de str) -> Self {
-        Deserializer { input }
+        Deserializer { input, depth: 0 }
     }
 
     fn peek(&self) -> Result<char> {
@@ -60,6 +61,14 @@ impl<'de> Deserializer<'de> {
     fn parse_string(&mut self) -> Result<String> {
         let (rem, par) =
             parser::string(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
+
+        self.input = rem;
+
+        Ok(par)
+    }
+
+    fn parse_key(&mut self) -> Result<String> {
+        let (rem, par) = parser::key(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
 
         self.input = rem;
 
@@ -277,22 +286,33 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        if self.take()? == '{' {
+        if self.depth < 1 {
+            self.parse_ws()?;
+
+            self.depth += 1;
             let val = visitor.visit_map(Access::new(self))?;
-            if self.take()? == '}' {
-                Ok(val)
-            } else {
-                Err(Error::SerdeError("Expected dict end".to_string()))
-            }
+            self.depth -= 1;
+
+            Ok(val)
         } else {
-            Err(Error::SerdeError("Expected dict open".to_string()))
+            if self.take()? == '{' {
+                let val = visitor.visit_map(Access::new(self))?;
+                if self.take()? == '}' {
+                    self.depth -= 1;
+                    Ok(val)
+                } else {
+                    Err(Error::SerdeError("Expected dict end".to_string()))
+                }
+            } else {
+                Err(Error::SerdeError("Expected dict open".to_string()))
+            }
         }
     }
 
     fn deserialize_struct<V>(
         self,
-        name: &'static str,
-        fields: &'static [&'static str],
+        _name: &'static str,
+        _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value>
     where
@@ -317,7 +337,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        todo!()
+        visitor.visit_string(self.parse_key()?)
     }
 
     fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value>
@@ -361,23 +381,27 @@ impl<'de, 'a> SeqAccess<'de> for Access<'a, 'de> {
 impl<'de, 'a> MapAccess<'de> for Access<'a, 'de> {
     type Error = Error;
 
-    fn next_key_seed<K>(&mut self, seed: K) -> std::result::Result<Option<K::Value>, Self::Error>
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
     where
         K: de::DeserializeSeed<'de>,
     {
         self.de.parse_ws()?;
-        if self.de.peek()? == '}' {
+        if self.de.depth > 1 && self.de.peek()? == '}' {
             return Ok(None);
         }
         let r = seed.deserialize(&mut *self.de).map(Some);
         if r.is_ok() {
             self.de.parse_ws()?;
+        } else if self.de.depth < 2 {
+            // We ran out of keys to parse
+            let _ = self.de.parse_ws();
+            return Ok(None);
         }
 
         r
     }
 
-    fn next_value_seed<V>(&mut self, seed: V) -> std::result::Result<V::Value, Self::Error>
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
     where
         V: de::DeserializeSeed<'de>,
     {
@@ -685,10 +709,8 @@ mod tests {
 
             let dict = from_str::<HashMap<String, i8>>(
                 "\
-{
 \"hello\" 101
 \"world\" -2
-}
 ",
             )
             .unwrap();
