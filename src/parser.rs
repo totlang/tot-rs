@@ -33,6 +33,10 @@ fn token(i: &str) -> PResult<&str> {
     take_till1(|c: char| c.is_whitespace())(i)
 }
 
+pub(crate) fn unit(i: &str) -> PResult<()> {
+    value((), tag("null"))(i)
+}
+
 pub(crate) fn boolean(i: &str) -> PResult<bool> {
     alt((value(true, tag("true")), value(false, tag("false"))))(i)
 }
@@ -96,6 +100,7 @@ fn key(i: &str) -> PResult<String> {
 // TODO missing s-expressions
 fn scalar(i: &str) -> PResult<TotValue> {
     alt((
+        map(unit, |_| TotValue::Unit),
         map(boolean, |v| TotValue::Boolean(v)),
         map(number, |v| TotValue::Number(v)),
         map(string, |v| TotValue::String(v)),
@@ -118,11 +123,6 @@ pub fn parse(i: &str) -> Result<TotValue, Error> {
             return Ok(v);
         }
     }
-    // if let Ok((rem, v)) = list_contents(i) {
-    //     if rem.is_empty() {
-    //         return Ok(v);
-    //     }
-    // }
 
     Err(Error::ParseError)
 }
@@ -132,30 +132,50 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    // #[test]
-    // fn test_parse() {
-    //     if let TotValue::Dict(v) = parse("test 1").unwrap() {
-    //         assert_eq!(
-    //             v.get_key_value("test").unwrap(),
-    //             (&"test".to_string(), &TotValue::Number(1.0))
-    //         );
-    //     } else {
-    //         assert!(false);
-    //     }
+    #[test]
+    fn test_parse() {
+        if let TotValue::Dict(v) = parse("test 1").unwrap() {
+            assert_eq!(
+                v.get_key_value("test").unwrap(),
+                (&"test".to_string(), &TotValue::Number(1.0))
+            );
+        } else {
+            assert!(false);
+        }
 
-    //     if let TotValue::Dict(v) = parse("test 1 blah true").unwrap() {
-    //         assert_eq!(v.get("test").unwrap(), &TotValue::Number(1.0));
-    //         assert_eq!(v.get("blah").unwrap(), &TotValue::Boolean(true));
-    //     } else {
-    //         assert!(false);
-    //     }
+        if let TotValue::Dict(v) = parse("test 1 blah true").unwrap() {
+            assert_eq!(v.get("test").unwrap(), &TotValue::Number(1.0));
+            assert_eq!(v.get("blah").unwrap(), &TotValue::Boolean(true));
+        } else {
+            assert!(false);
+        }
 
-    //     if let TotValue::List(v) = parse("\"test string\"").unwrap() {
-    //         assert_eq!(v[0], TotValue::String("test string".to_string()));
-    //     } else {
-    //         assert!(false);
-    //     }
-    // }
+        if let TotValue::Dict(v) = parse(
+            "\
+test 1
+blah true
+dict {
+    hello \"world\"
+}
+",
+        )
+        .unwrap()
+        {
+            assert_eq!(v.get("test").unwrap(), &TotValue::Number(1.0));
+            assert_eq!(v.get("blah").unwrap(), &TotValue::Boolean(true));
+            assert_eq!(
+                v.get("dict").unwrap(),
+                &TotValue::Dict({
+                    let mut m = HashMap::new();
+                    m.insert("hello".to_string(), TotValue::String("world".to_string()));
+
+                    m
+                })
+            );
+        } else {
+            assert!(false);
+        }
+    }
 
     #[test]
     fn test_token() {
@@ -260,45 +280,45 @@ mod tests {
         assert_eq!(rem, "woot");
     }
 
-    // #[test]
-    // fn test_list() {
-    //     let (rem, par) = list("[]").unwrap();
-    //     assert_eq!(rem, "");
-    //     assert_eq!(par, TotValue::List(vec![]));
+    #[test]
+    fn test_list() {
+        let (rem, par) = list("[]").unwrap();
+        assert_eq!(rem, "");
+        assert_eq!(par, TotValue::List(vec![]));
 
-    //     let (rem, par) = list("[1]").unwrap();
-    //     assert_eq!(rem, "");
-    //     assert_eq!(par, TotValue::List(vec![TotValue::Number(1.0)]));
+        let (rem, par) = list("[1]").unwrap();
+        assert_eq!(rem, "");
+        assert_eq!(par, TotValue::List(vec![TotValue::Number(1.0)]));
 
-    //     let (rem, par) = list("[] blah []").unwrap();
-    //     assert_eq!(rem, " blah []");
-    //     assert_eq!(par, TotValue::List(vec![]));
+        let (rem, par) = list("[] blah []").unwrap();
+        assert_eq!(rem, " blah []");
+        assert_eq!(par, TotValue::List(vec![]));
 
-    //     let (rem, par) = list("[1] blah []").unwrap();
-    //     assert_eq!(rem, " blah []");
-    //     assert_eq!(par, TotValue::List(vec![TotValue::Number(1.0)]));
+        let (rem, par) = list("[1] blah []").unwrap();
+        assert_eq!(rem, " blah []");
+        assert_eq!(par, TotValue::List(vec![TotValue::Number(1.0)]));
 
-    //     let (rem, par) = list("[1, 2\n , /* inner comment */ 3.1 4] blah []").unwrap();
-    //     assert_eq!(rem, " blah []");
-    //     assert_eq!(
-    //         par,
-    //         TotValue::List(vec![
-    //             TotValue::Number(1.0),
-    //             TotValue::Number(2.0),
-    //             TotValue::Number(3.1),
-    //             TotValue::Number(4.0)
-    //         ])
-    //     );
+        let (rem, par) = list("[1, 2\n , /* inner comment */ 3.1 4] blah []").unwrap();
+        assert_eq!(rem, " blah []");
+        assert_eq!(
+            par,
+            TotValue::List(vec![
+                TotValue::Number(1.0),
+                TotValue::Number(2.0),
+                TotValue::Number(3.1),
+                TotValue::Number(4.0)
+            ])
+        );
 
-    //     assert!(list("").is_err());
-    //     // Not a list
-    //     assert!(list("hello").is_err());
-    //     // Invalid identifier
-    //     assert!(list("[hello]").is_err());
-    //     // Unterminated list
-    //     assert!(list("[").is_err());
-    //     assert!(list("[ 1 ").is_err());
-    // }
+        assert!(list("").is_err());
+        // Not a list
+        assert!(list("hello").is_err());
+        // Invalid identifier
+        assert!(list("[hello]").is_err());
+        // Unterminated list
+        assert!(list("[").is_err());
+        assert!(list("[ 1 ").is_err());
+    }
 
     #[test]
     fn test_dict() {
