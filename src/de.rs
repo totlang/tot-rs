@@ -76,6 +76,7 @@ impl<'de> Deserializer<'de> {
     }
 }
 
+/// Try to deserialize a `str` into a `T`.
 pub fn from_str<'a, T>(s: &'a str) -> Result<T>
 where
     T: Deserialize<'a>,
@@ -184,11 +185,12 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         visitor.visit_f64(self.parse_number()?)
     }
 
+    // TODO needs tests
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_str(visitor)
     }
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
@@ -205,6 +207,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         visitor.visit_string(self.parse_string()?)
     }
 
+    // TODO needs tests
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
@@ -212,6 +215,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         todo!()
     }
 
+    // TODO needs tests
     fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
@@ -219,6 +223,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         todo!()
     }
 
+    // TODO needs tests
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
@@ -226,6 +231,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         todo!()
     }
 
+    // TODO needs tests
     fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
@@ -252,7 +258,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         if self.take()? == '[' {
+            self.depth += 1;
             let val = visitor.visit_seq(Access::new(self))?;
+            self.depth -= 1;
             if self.take()? == ']' {
                 Ok(val)
             } else {
@@ -272,14 +280,14 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_tuple_struct<V>(
         self,
-        name: &'static str,
-        len: usize,
+        _name: &'static str,
+        _len: usize,
         visitor: V,
     ) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_seq(visitor)
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
@@ -296,9 +304,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             Ok(val)
         } else {
             if self.take()? == '{' {
+                self.depth += 1;
                 let val = visitor.visit_map(Access::new(self))?;
+                self.depth -= 1;
                 if self.take()? == '}' {
-                    self.depth -= 1;
                     Ok(val)
                 } else {
                     Err(Error::SerdeError("Expected dict end".to_string()))
@@ -321,6 +330,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         self.deserialize_map(visitor)
     }
 
+    // TODO needs tests
     fn deserialize_enum<V>(
         self,
         name: &'static str,
@@ -344,7 +354,239 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_any(visitor)
+    }
+}
+
+struct KeyDeserializer<'a, 'de: 'a> {
+    de: &'a mut Deserializer<'de>,
+}
+
+impl<'a, 'de> KeyDeserializer<'a, 'de> {
+    fn new(de: &'a mut Deserializer<'de>) -> Self {
+        Self { de }
+    }
+}
+
+impl<'a, 'de> de::Deserializer<'de> for &'a mut KeyDeserializer<'a, 'de> {
+    type Error = Error;
+
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_any(visitor)
+    }
+
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_string(self.de.parse_key()?)
+    }
+
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_bytes(visitor)
+    }
+
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_byte_buf(visitor)
+    }
+
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_option(visitor)
+    }
+
+    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_unit(visitor)
+    }
+
+    fn deserialize_unit_struct<V>(self, name: &'static str, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_unit_struct(name, visitor)
+    }
+
+    fn deserialize_newtype_struct<V>(self, name: &'static str, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_newtype_struct(name, visitor)
+    }
+
+    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_seq(visitor)
+    }
+
+    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        Err(Error::SerdeError("a tuple cannot be a key".to_string()))
+    }
+
+    fn deserialize_tuple_struct<V>(
+        self,
+        name: &'static str,
+        len: usize,
+        visitor: V,
+    ) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_tuple_struct(name, len, visitor)
+    }
+
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_map(visitor)
+    }
+
+    fn deserialize_struct<V>(
+        self,
+        name: &'static str,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_struct(name, fields, visitor)
+    }
+
+    fn deserialize_enum<V>(
+        self,
+        name: &'static str,
+        variants: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_enum(name, variants, visitor)
+    }
+
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_identifier(visitor)
+    }
+
+    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.de.deserialize_ignored_any(visitor)
     }
 }
 
@@ -389,7 +631,9 @@ impl<'de, 'a> MapAccess<'de> for Access<'a, 'de> {
         if self.de.depth > 1 && self.de.peek()? == '}' {
             return Ok(None);
         }
-        let r = seed.deserialize(&mut *self.de).map(Some);
+        let r = seed
+            .deserialize(&mut KeyDeserializer::new(&mut self.de))
+            .map(Some);
         if r.is_ok() {
             self.de.parse_ws()?;
         } else if self.de.depth < 2 {
@@ -460,6 +704,7 @@ mod tests {
 
     mod de_tests {
         use super::*;
+        use serde::Deserialize;
 
         #[test]
         fn test_de_bool() {
@@ -726,18 +971,103 @@ mod tests {
             assert_eq!(dict.get(&"world".to_string()).unwrap(), &-2);
         }
 
-        #[test]
-        fn test_de_struct() {
-            #[derive(serde::Deserialize)]
-            struct TestStruct {
-                name: String,
-                age: u32,
-                foods: Vec<String>,
-                hungry: bool,
+        mod structs {
+            use super::*;
+            use std::collections::HashMap;
+
+            #[test]
+            fn test_de_newtype_struct_int() {
+                #[derive(Deserialize)]
+                struct TestStruct(i32);
+
+                assert_eq!(from_str::<TestStruct>("10").unwrap().0, 10);
             }
 
-            let r = from_str::<TestStruct>(
-                "\
+            #[test]
+            fn test_de_newtype_struct_map() {
+                #[derive(Deserialize)]
+                struct TestStruct(HashMap<String, String>);
+
+                assert_eq!(
+                    from_str::<TestStruct>("hello \"world\"")
+                        .unwrap()
+                        .0
+                        .get(&"hello".to_string())
+                        .unwrap(),
+                    &"world".to_string()
+                );
+                assert_eq!(
+                    from_str::<TestStruct>("\"hello\" \"world\"")
+                        .unwrap()
+                        .0
+                        .get(&"hello".to_string())
+                        .unwrap(),
+                    &"world".to_string()
+                );
+            }
+
+            #[test]
+            fn test_de_tuple_struct_int_int() {
+                #[derive(Deserialize)]
+                struct TestStruct(i32, i32);
+
+                let r = from_str::<TestStruct>("[10 -123]").unwrap();
+
+                assert_eq!(r.0, 10);
+                assert_eq!(r.1, -123);
+            }
+
+            #[test]
+            fn test_de_tuple_struct_string_bool() {
+                #[derive(Deserialize)]
+                struct TestStruct(String, bool);
+
+                let r = from_str::<TestStruct>("[\"hello world\" false]").unwrap();
+
+                assert_eq!(r.0, "hello world".to_string());
+                assert_eq!(r.1, false);
+            }
+
+            #[test]
+            fn test_de_nested_tuple_struct() {
+                #[derive(Deserialize)]
+                struct TestStruct(Inner, Inner);
+
+                #[derive(Deserialize)]
+                struct Inner(i32, bool);
+
+                let r = from_str::<TestStruct>(
+                    "\
+[
+    [
+        -22 true
+    ]
+    [
+        123 false
+    ]
+]
+",
+                )
+                .unwrap();
+
+                assert_eq!(r.0 .0, -22);
+                assert_eq!(r.0 .1, true);
+                assert_eq!(r.1 .0, 123);
+                assert_eq!(r.1 .1, false);
+            }
+
+            #[test]
+            fn test_de_simple_struct() {
+                #[derive(Deserialize)]
+                struct TestStruct {
+                    name: String,
+                    age: u32,
+                    foods: Vec<String>,
+                    hungry: bool,
+                }
+
+                let r = from_str::<TestStruct>(
+                    "\
 name \"Tim\"
 age 18
 foods [
@@ -746,13 +1076,48 @@ foods [
 ]
 hungry true
 ",
-            )
-            .unwrap();
-            assert_eq!(r.name, "Tim".to_string());
-            assert_eq!(r.age, 18);
-            assert_eq!(r.foods[0], "rice".to_string());
-            assert_eq!(r.foods[1], "chicken".to_string());
-            assert_eq!(r.hungry, true);
+                )
+                .unwrap();
+                assert_eq!(r.name, "Tim".to_string());
+                assert_eq!(r.age, 18);
+                assert_eq!(r.foods[0], "rice".to_string());
+                assert_eq!(r.foods[1], "chicken".to_string());
+                assert_eq!(r.hungry, true);
+            }
+
+            #[test]
+            fn test_de_nested_struct() {
+                #[derive(Deserialize)]
+                struct TestStruct {
+                    name: String,
+                    inner: Inner,
+                }
+
+                #[derive(Deserialize)]
+                struct Inner {
+                    age: u32,
+                    bools: Vec<bool>,
+                }
+
+                let r = from_str::<TestStruct>(
+                    "\
+name \"Tim\"
+inner {
+    age 100
+    bools [
+        true
+        false
+    ]
+}
+",
+                )
+                .unwrap();
+
+                assert_eq!(r.name, "Tim".to_string());
+                assert_eq!(r.inner.age, 100);
+                assert_eq!(r.inner.bools[0], true);
+                assert_eq!(r.inner.bools[1], false);
+            }
         }
     }
 }

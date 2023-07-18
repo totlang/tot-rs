@@ -97,6 +97,10 @@ pub(crate) fn key(i: &str) -> PResult<String> {
     alt((map(string, String::from), map(token, String::from)))(i)
 }
 
+pub(crate) fn expression(i: &str) -> PResult<TotValue> {
+    todo!()
+}
+
 // TODO missing s-expressions
 fn scalar(i: &str) -> PResult<TotValue> {
     alt((
