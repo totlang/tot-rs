@@ -46,6 +46,7 @@ pub(crate) fn number(i: &str) -> PResult<f64> {
 }
 
 pub(crate) fn string(i: &str) -> PResult<String> {
+    println!("nom\n{i}");
     map(
         delimited(tag("\""), take_till1(|c: char| c == '"'), tag("\"")),
         String::from,
@@ -179,6 +180,12 @@ dict {
         } else {
             assert!(false);
         }
+    }
+
+    #[test]
+    fn test_unit() {
+        let (rem, _) = unit("null// hello").unwrap();
+        assert_eq!(rem, "// hello");
     }
 
     #[test]

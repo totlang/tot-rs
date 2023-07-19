@@ -1,4 +1,4 @@
-use serde::de::{MapAccess, SeqAccess};
+use serde::de::{EnumAccess, IntoDeserializer, MapAccess, SeqAccess, VariantAccess, Visitor};
 use serde::{de, Deserialize};
 
 use crate::error::{Error, Result};
@@ -34,6 +34,14 @@ impl<'de> Deserializer<'de> {
     fn parse_ws(&mut self) -> Result<()> {
         let (rem, _) =
             parser::all_ignored(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
+
+        self.input = rem;
+
+        Ok(())
+    }
+
+    fn parse_unit(&mut self) -> Result<()> {
+        let (rem, _) = parser::unit(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
 
         self.input = rem;
 
@@ -83,7 +91,6 @@ where
 {
     let mut deserializer = Deserializer::from_str(s);
     let t = T::deserialize(&mut deserializer)?;
-    let _ = deserializer.parse_ws(); // Remove trailing newline just in case
     if deserializer.input.is_empty() {
         Ok(t)
     } else {
@@ -102,6 +109,8 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             't' | 'f' => self.deserialize_bool(visitor),
             '0'..='9' | '-' => self.deserialize_f64(visitor),
             '"' | '\'' => self.deserialize_str(visitor),
+            '{' => self.deserialize_map(visitor),
+            '[' => self.deserialize_seq(visitor),
             _ => Err(Error::SerdeError("Syntax".to_string())),
         }
     }
@@ -185,7 +194,6 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         visitor.visit_f64(self.parse_number()?)
     }
 
-    // TODO needs tests
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
@@ -207,36 +215,38 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         visitor.visit_string(self.parse_string()?)
     }
 
-    // TODO needs tests
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_seq(visitor)
     }
 
-    // TODO needs tests
     fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_seq(visitor)
     }
 
-    // TODO needs tests
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        todo!()
+        if self.peek()? == 'n' {
+            self.parse_unit()?;
+            visitor.visit_none()
+        } else {
+            visitor.visit_some(self)
+        }
     }
 
-    // TODO needs tests
     fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        todo!()
+        let _ = self.parse_unit()?;
+        visitor.visit_unit()
     }
 
     fn deserialize_unit_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
@@ -246,7 +256,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         self.deserialize_unit(visitor)
     }
 
-    fn deserialize_newtype_struct<V>(self, name: &'static str, visitor: V) -> Result<V::Value>
+    fn deserialize_newtype_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
@@ -262,6 +272,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             let val = visitor.visit_seq(Access::new(self))?;
             self.depth -= 1;
             if self.take()? == ']' {
+                let _ = self.parse_ws();
                 Ok(val)
             } else {
                 Err(Error::SerdeError("Expected array end".to_string()))
@@ -295,8 +306,6 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         if self.depth < 1 {
-            self.parse_ws()?;
-
             self.depth += 1;
             let val = visitor.visit_map(Access::new(self))?;
             self.depth -= 1;
@@ -307,7 +316,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 self.depth += 1;
                 let val = visitor.visit_map(Access::new(self))?;
                 self.depth -= 1;
+
                 if self.take()? == '}' {
+                    let _ = self.parse_ws();
                     Ok(val)
                 } else {
                     Err(Error::SerdeError("Expected dict end".to_string()))
@@ -330,17 +341,43 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         self.deserialize_map(visitor)
     }
 
-    // TODO needs tests
+    // TODO logic is mostly the same as map except for the visit method call. maybe pass function pointer?
     fn deserialize_enum<V>(
         self,
-        name: &'static str,
-        variants: &'static [&'static str],
+        _name: &'static str,
+        _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        todo!()
+        if self.peek()? == '"' {
+            return visitor.visit_enum(self.parse_string()?.into_deserializer());
+        }
+
+        if self.depth < 1 {
+            self.depth += 1;
+            let val = visitor.visit_enum(Access::new(self))?;
+            self.depth -= 1;
+
+            Ok(val)
+        } else {
+            if self.take()? == '{' {
+                self.depth += 1;
+                let val = visitor.visit_enum(Access::new(self))?;
+                self.depth -= 1;
+
+                println!("---de-enum\n{}", self.input);
+
+                if self.take()? == '}' {
+                    Ok(val)
+                } else {
+                    Err(Error::SerdeError("Expected enum end".to_string()))
+                }
+            } else {
+                Err(Error::SerdeError("Expected enum open".to_string()))
+            }
+        }
     }
 
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
@@ -382,91 +419,91 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut KeyDeserializer<'a, 'de> {
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_bool(visitor)
     }
 
     fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_i8(visitor)
     }
 
     fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_i16(visitor)
     }
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_i32(visitor)
     }
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_i64(visitor)
     }
 
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_u8(visitor)
     }
 
     fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_u16(visitor)
     }
 
     fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_u32(visitor)
     }
 
     fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_u64(visitor)
     }
 
     fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_f32(visitor)
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        self.de.deserialize_f64(visitor)
     }
 
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        visitor.visit_str(self.de.parse_key()?.as_str())
     }
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_string(self.de.parse_key()?)
+        visitor.visit_str(self.de.parse_key()?.as_str())
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
@@ -529,7 +566,7 @@ impl<'a, 'de> de::Deserializer<'de> for &'a mut KeyDeserializer<'a, 'de> {
     where
         V: de::Visitor<'de>,
     {
-        Err(Error::SerdeError("a tuple cannot be a key".to_string()))
+        self.de.deserialize_tuple(len, visitor)
     }
 
     fn deserialize_tuple_struct<V>(
@@ -659,9 +696,64 @@ impl<'de, 'a> MapAccess<'de> for Access<'a, 'de> {
     }
 }
 
+impl<'de, 'a> EnumAccess<'de> for Access<'a, 'de> {
+    type Error = Error;
+    type Variant = Self;
+
+    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant)>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        self.de.parse_ws()?;
+        let val = seed.deserialize(&mut *self.de)?;
+
+        Ok((val, self))
+    }
+}
+
+impl<'de, 'a> VariantAccess<'de> for Access<'a, 'de> {
+    type Error = Error;
+
+    fn unit_variant(self) -> Result<()> {
+        Err(Error::SerdeError("Expected string".to_string()))
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        self.de.parse_ws()?;
+
+        let val = seed.deserialize(&mut *self.de);
+        if val.is_ok() {
+            self.de.parse_ws()?;
+        }
+
+        val
+    }
+
+    fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.de.parse_ws()?;
+        de::Deserializer::deserialize_seq(self.de, visitor)
+    }
+
+    fn struct_variant<V>(self, _fields: &'static [&'static str], visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.de.parse_ws()?;
+        de::Deserializer::deserialize_map(self.de, visitor)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{from_str, Deserializer};
+    use serde::Deserialize;
+    use std::collections::HashMap;
 
     mod deserializer_tests {
         use super::*;
@@ -681,6 +773,12 @@ mod tests {
             de.parse_ws().unwrap();
 
             assert_eq!(de.parse_bool().unwrap(), true);
+        }
+
+        #[test]
+        fn test_unit() {
+            let mut de = de("null");
+            assert!(de.parse_unit().is_ok());
         }
 
         #[test]
@@ -704,7 +802,12 @@ mod tests {
 
     mod de_tests {
         use super::*;
-        use serde::Deserialize;
+
+        #[test]
+        fn test_de_unit() {
+            assert!(from_str::<()>("null").is_ok());
+            assert!(from_str::<()>("\"null\"").is_err());
+        }
 
         #[test]
         fn test_de_bool() {
@@ -893,10 +996,35 @@ mod tests {
         }
 
         #[test]
+        fn test_de_char() {
+            assert_eq!(from_str::<char>("\"a\"").unwrap(), 'a');
+            assert_eq!(from_str::<char>("\"0\"").unwrap(), '0');
+
+            assert!(from_str::<char>("\"abc\"").is_err());
+        }
+
+        #[test]
         fn test_de_string() {
             assert_eq!(
                 from_str::<String>("\"hello world\"").unwrap(),
                 "hello world"
+            );
+        }
+
+        #[test]
+        fn test_de_bytes() {
+            assert_eq!(
+                from_str::<[u8; 3]>(
+                    "\
+[
+    1.0
+    2.0
+    3.0
+]
+"
+                )
+                .unwrap(),
+                [1, 2, 3]
             );
         }
 
@@ -949,13 +1077,12 @@ mod tests {
         }
 
         #[test]
-        fn test_de_map() {
-            use std::collections::HashMap;
-
+        fn test_de_map_string_integer() {
             let dict = from_str::<HashMap<String, i8>>(
                 "\
-\"hello\" 101
+hello 101
 \"world\" -2
+\"hello world\" 1
 ",
             )
             .unwrap();
@@ -964,6 +1091,7 @@ mod tests {
                 let mut m = HashMap::new();
                 m.insert("hello".to_string(), 101);
                 m.insert("world".to_string(), -2);
+                m.insert("hello world".to_string(), 1);
 
                 m
             });
@@ -971,9 +1099,44 @@ mod tests {
             assert_eq!(dict.get(&"world".to_string()).unwrap(), &-2);
         }
 
+        #[test]
+        fn test_de_map_integer_integer() {
+            let dict = from_str::<HashMap<i32, i32>>(
+                "\
+1 2
+3 4
+",
+            )
+            .unwrap();
+
+            assert_eq!(dict.get(&1).unwrap(), &2);
+            assert_eq!(dict.get(&3).unwrap(), &4);
+        }
+
+        #[test]
+        fn test_de_option() {
+            let r = from_str::<Option<bool>>("true").unwrap();
+            assert_eq!(r.unwrap(), true);
+
+            let r = from_str::<Option<String>>("\"hello world\"").unwrap();
+            assert_eq!(r.unwrap(), "hello world");
+
+            let r = from_str::<Option<String>>("null").unwrap();
+            assert!(r.is_none());
+        }
+
         mod structs {
             use super::*;
             use std::collections::HashMap;
+
+            #[test]
+            fn test_de_unit_struct() {
+                #[derive(Deserialize)]
+                struct TestStruct;
+
+                assert!(from_str::<TestStruct>("null").is_ok());
+                assert!(from_str::<TestStruct>("").is_err());
+            }
 
             #[test]
             fn test_de_newtype_struct_int() {
@@ -981,6 +1144,16 @@ mod tests {
                 struct TestStruct(i32);
 
                 assert_eq!(from_str::<TestStruct>("10").unwrap().0, 10);
+                assert!(from_str::<TestStruct>("true").is_err());
+            }
+
+            #[test]
+            fn test_de_newtype_struct_option_int() {
+                #[derive(Deserialize)]
+                struct TestStruct(Option<i32>);
+
+                assert_eq!(from_str::<TestStruct>("2").unwrap().0.unwrap(), 2);
+                assert!(from_str::<TestStruct>("null").unwrap().0.is_none());
             }
 
             #[test]
@@ -1117,6 +1290,243 @@ inner {
                 assert_eq!(r.inner.age, 100);
                 assert_eq!(r.inner.bools[0], true);
                 assert_eq!(r.inner.bools[1], false);
+            }
+        }
+
+        // TODO missing complicated enum tests
+        mod enums {
+            use super::*;
+            use std::collections::HashMap;
+
+            #[test]
+            fn test_de_enum_unit() {
+                #[derive(Deserialize)]
+                enum TestEnum {
+                    Unit,
+                }
+
+                assert!(from_str::<TestEnum>("\"Unit\"").is_ok());
+                assert!(from_str::<TestEnum>("\"Missing\"").is_err());
+            }
+
+            #[test]
+            fn test_de_enum_variant_newtype() {
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum TestEnum {
+                    Bool(bool),
+                    Integer(i32),
+                    String(String),
+                    HashMap(HashMap<String, String>),
+                }
+
+                assert_eq!(
+                    from_str::<TestEnum>("Bool true").unwrap(),
+                    TestEnum::Bool(true)
+                );
+                assert_eq!(
+                    from_str::<TestEnum>("Integer -22").unwrap(),
+                    TestEnum::Integer(-22)
+                );
+                assert_eq!(
+                    from_str::<TestEnum>("String \"hello world\"").unwrap(),
+                    TestEnum::String("hello world".to_string())
+                );
+                assert_eq!(
+                    from_str::<TestEnum>(
+                        "\
+HashMap {
+    hello \"world\"
+}
+"
+                    )
+                    .unwrap(),
+                    TestEnum::HashMap({
+                        let mut m = HashMap::new();
+                        m.insert("hello".to_string(), "world".to_string());
+
+                        m
+                    })
+                );
+            }
+
+            #[test]
+            fn test_de_enum_tuple_variant() {
+                #[derive(Deserialize, PartialEq, Eq, Debug)]
+                enum TestEnum {
+                    Tuple(i32, bool),
+                }
+
+                assert_eq!(
+                    from_str::<TestEnum>(
+                        "\
+Tuple [
+    100.0
+    false
+]
+"
+                    )
+                    .unwrap(),
+                    TestEnum::Tuple(100, false)
+                );
+            }
+
+            #[test]
+            fn test_de_enum_nested_newtype() {
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum TestEnum {
+                    Inner(Inner),
+                }
+
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum Inner {
+                    String(String),
+                }
+
+                assert_eq!(
+                    from_str::<TestEnum>(
+                        "\
+Inner {
+    String \"Hello\"
+}
+"
+                    )
+                    .unwrap(),
+                    TestEnum::Inner(Inner::String("Hello".to_string()))
+                );
+            }
+
+            #[test]
+            fn test_de_enum_nested_enum_tuple() {
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum TestEnum {
+                    Inner(Inner),
+                }
+
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum Inner {
+                    Tuple(String, bool),
+                }
+
+                assert_eq!(
+                    from_str::<TestEnum>(
+                        "\
+Inner {
+    Tuple [
+        \"hello\"
+        true
+    ]
+}
+"
+                    )
+                    .unwrap(),
+                    TestEnum::Inner(Inner::Tuple("hello".to_string(), true))
+                );
+            }
+
+            #[test]
+            fn test_enum_variant_struct() {
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum TestEnum {
+                    Struct { string: String, integer: i32 },
+                }
+
+                assert_eq!(
+                    from_str::<TestEnum>(
+                        "\
+Struct {
+    string \"hello world\"
+    integer 10.0
+}
+"
+                    )
+                    .unwrap(),
+                    TestEnum::Struct {
+                        string: "hello world".to_string(),
+                        integer: 10
+                    }
+                );
+            }
+
+            #[test]
+            fn test_de_enum_nested_enum_struct() {
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum TestEnum {
+                    Inner(Inner),
+                }
+
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum Inner {
+                    Struct { boolean: bool, string: String },
+                }
+
+                assert_eq!(
+                    from_str::<TestEnum>(
+                        "\
+Inner {
+    Struct {
+        boolean false
+        string \"blah\"
+    }
+}
+"
+                    )
+                    .unwrap(),
+                    TestEnum::Inner(Inner::Struct {
+                        boolean: false,
+                        string: "blah".to_string()
+                    })
+                );
+            }
+
+            #[test]
+            fn test_de_enum_multi_nested() {
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum TestEnum {
+                    MultiVariant(i32, Inner),
+                }
+
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum Inner {
+                    Variant(InnerInner, InnerInner),
+                }
+
+                #[derive(Deserialize, Debug, PartialEq, Eq)]
+                enum InnerInner {
+                    Unit,
+                    Struct { string: String, boolean: bool },
+                }
+
+                assert_eq!(
+                    from_str::<TestEnum>(
+                        "\
+MultiVariant [
+    100.0
+    {
+        Variant [
+            \"Unit\"
+            {
+                Struct {
+                    string \"hello\"
+                    boolean true
+                }
+            }
+        ]
+    }
+]
+"
+                    )
+                    .unwrap(),
+                    TestEnum::MultiVariant(
+                        100,
+                        Inner::Variant(
+                            InnerInner::Unit,
+                            InnerInner::Struct {
+                                string: "hello".to_string(),
+                                boolean: true,
+                            },
+                        ),
+                    )
+                )
             }
         }
     }

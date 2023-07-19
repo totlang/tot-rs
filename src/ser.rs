@@ -828,7 +828,26 @@ mod tests {
     }
 ]
 "
-            )
+            );
+        }
+
+        #[test]
+        fn test_bytes() {
+            let data: &[u8] = &[0, 1, 2, 3];
+
+            let output = to_string(&data).unwrap();
+
+            assert_eq!(
+                output,
+                "\
+[
+    0.0
+    1.0
+    2.0
+    3.0
+]
+"
+            );
         }
 
         #[test]
@@ -1179,6 +1198,7 @@ inner {
         }
     }
 
+    // TODO missing enum struct test
     mod enum_tests {
         use super::*;
 
