@@ -367,8 +367,6 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 let val = visitor.visit_enum(Access::new(self))?;
                 self.depth -= 1;
 
-                println!("---de-enum\n{}", self.input);
-
                 if self.take()? == '}' {
                     Ok(val)
                 } else {
@@ -1251,10 +1249,39 @@ hungry true
 ",
                 )
                 .unwrap();
-                assert_eq!(r.name, "Tim".to_string());
+                assert_eq!(r.name, "Tim");
                 assert_eq!(r.age, 18);
-                assert_eq!(r.foods[0], "rice".to_string());
-                assert_eq!(r.foods[1], "chicken".to_string());
+                assert_eq!(r.foods[0], "rice");
+                assert_eq!(r.foods[1], "chicken");
+                assert_eq!(r.hungry, true);
+            }
+
+            #[test]
+            fn test_de_simple_struct1() {
+                #[derive(Deserialize)]
+                struct TestStruct {
+                    name: String,
+                    age: u32,
+                    foods: Vec<String>,
+                    hungry: bool,
+                }
+
+                let r = from_str::<TestStruct>(
+                    "\
+name \"\"
+age 18
+foods [
+    \"rice\"
+    \"chicken\"
+]
+hungry true
+",
+                )
+                .unwrap();
+                assert_eq!(r.name, "");
+                assert_eq!(r.age, 18);
+                assert_eq!(r.foods[0], "rice");
+                assert_eq!(r.foods[1], "chicken");
                 assert_eq!(r.hungry, true);
             }
 
@@ -1290,6 +1317,42 @@ inner {
                 assert_eq!(r.inner.age, 100);
                 assert_eq!(r.inner.bools[0], true);
                 assert_eq!(r.inner.bools[1], false);
+            }
+
+            #[test]
+            fn test_de_nested_struct1() {
+                #[derive(Deserialize, PartialEq, Eq)]
+                struct TestStruct {
+                    boolean: bool,
+                    inner: Inner,
+                }
+
+                #[derive(Deserialize, PartialEq, Eq)]
+                struct Inner {
+                    key1: String,
+                    key2: String,
+                    key3: String,
+                    key4: String,
+                }
+
+                let r = from_str::<TestStruct>(
+                    "\
+boolean true
+inner {
+    key1 \"hello\"
+    key2 \"world\"
+    key3 \"wew\"
+    key4 \"lad\"
+}
+",
+                )
+                .unwrap();
+
+                assert_eq!(r.boolean, true);
+                assert_eq!(r.inner.key1, "hello");
+                assert_eq!(r.inner.key2, "world");
+                assert_eq!(r.inner.key3, "wew");
+                assert_eq!(r.inner.key4, "lad");
             }
         }
 

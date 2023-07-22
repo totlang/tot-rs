@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use nom::{
     branch::alt,
-    bytes::complete::{is_not, tag, take_till1, take_until},
+    bytes::complete::{is_not, tag, take_till, take_till1, take_until},
     character::complete::multispace1,
     combinator::{map, value},
     multi::many0,
@@ -46,9 +46,8 @@ pub(crate) fn number(i: &str) -> PResult<f64> {
 }
 
 pub(crate) fn string(i: &str) -> PResult<String> {
-    println!("nom\n{i}");
     map(
-        delimited(tag("\""), take_till1(|c: char| c == '"'), tag("\"")),
+        delimited(tag("\""), take_till(|c: char| c == '"'), tag("\"")),
         String::from,
     )(i)
 }
