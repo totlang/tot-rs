@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+};
 
 use nom::{
     branch::alt,
@@ -15,6 +18,22 @@ use nom::{
 pub enum Error {
     #[error("error ocurred while parsing")]
     ParseError,
+    #[error("whitespace error {0}")]
+    WhitespaceError(String),
+    #[error("unit error {0}")]
+    UnitError(String),
+    #[error("bool error {0}")]
+    BoolError(String),
+    #[error("number error {0}")]
+    NumberError(String),
+    #[error("string error {0}")]
+    StringError(String),
+    #[error("expression error {0}")]
+    ExpressionError(String),
+    #[error("dict error {0}")]
+    DictError(String),
+    #[error("list error {0}")]
+    ListError(String),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -25,8 +44,194 @@ pub enum TotValue {
     Number(f64),
     List(Vec<TotValue>),
     Dict(HashMap<String, TotValue>),
+    Generator { name: String },
+    Missing, // TODO probably should add more context data?
 }
 
+#[derive(Debug)]
+pub(crate) struct Parser<'a> {
+    known_expressions: RefCell<HashMap<&'a str, TotExpression<'a>>>,
+    missing_expressions: RefCell<HashMap<&'a str, TotExpression<'a>>>,
+}
+
+// TODO parse_* might be able to be &mut to simplify input access
+impl<'a> Parser<'a> {
+    pub(crate) fn new() -> Self {
+        Self {
+            known_expressions: RefCell::new(HashMap::new()),
+            missing_expressions: RefCell::new(HashMap::new()),
+        }
+    }
+
+    // fn data(&self) -> &str {
+    //     &self.input[self.offset.get()..]
+    // }
+
+    // fn offset(&self, input: &'a str) {
+    //     let offset = input.as_ptr() as usize - self.input.as_ptr() as usize;
+    //     self.offset.set(offset);
+    // }
+
+    fn token(&self, i: &'a str) -> PResult<&str> {
+        take_till1(|c: char| c.is_whitespace())(i)
+    }
+
+    pub(crate) fn unit(&self, i: &'a str) -> PResult<()> {
+        value((), tag("null"))(i)
+    }
+
+    pub(crate) fn boolean(&self, i: &'a str) -> PResult<bool> {
+        alt((value(true, tag("true")), value(false, tag("false"))))(i)
+    }
+
+    pub(crate) fn number(&self, i: &'a str) -> PResult<f64> {
+        double(i)
+    }
+
+    pub(crate) fn string(&self, i: &'a str) -> PResult<String> {
+        map(
+            delimited(tag("\""), take_till(|c: char| c == '"'), tag("\"")),
+            String::from,
+        )(i)
+    }
+
+    fn whitespace(&self, i: &'a str) -> PResult<()> {
+        map(multispace1, |_| ())(i)
+    }
+
+    fn comma(&self, i: &'a str) -> PResult<()> {
+        value((), tag(","))(i)
+    }
+
+    fn line_comment(&self, i: &'a str) -> PResult<()> {
+        value((), pair(tag("//"), is_not("\r\n")))(i)
+    }
+
+    fn block_comment(&self, i: &'a str) -> PResult<()> {
+        value((), tuple((tag("/*"), take_until("*/"), tag("*/"))))(i)
+    }
+
+    pub(crate) fn all_ignored(&'a self, i: &'a str) -> PResult<()> {
+        map(
+            many0(alt((
+                |i: &'a str| self.line_comment(i),
+                |i: &'a str| self.block_comment(i),
+                |i: &'a str| self.comma(i),
+                |i: &'a str| self.whitespace(i),
+            ))),
+            |_| (),
+        )(i)
+    }
+
+    fn list(&'a self, i: &'a str) -> PResult<TotValue> {
+        delimited(
+            tag("["),
+            map(
+                many0(delimited(
+                    |i: &'a str| self.all_ignored(i),
+                    |i: &'a str| self.scalar(i),
+                    |i: &'a str| self.all_ignored(i),
+                )),
+                |v| TotValue::List(v),
+            ),
+            tag("]"),
+        )(i)
+    }
+
+    fn dict(&'a self, i: &'a str) -> PResult<TotValue> {
+        delimited(tag("{"), |i: &'a str| self.dict_contents(i), tag("}"))(i)
+    }
+
+    fn dict_contents(&'a self, i: &'a str) -> PResult<TotValue> {
+        map(many0(|i: &'a str| self.key_value(i)), |v| {
+            TotValue::Dict(HashMap::from_iter(v))
+        })(i)
+    }
+
+    pub(crate) fn key(&'a self, i: &'a str) -> PResult<String> {
+        alt((
+            map(|i: &'a str| self.string(i), String::from),
+            map(|i: &'a str| self.token(i), String::from),
+        ))(i)
+    }
+
+    pub(crate) fn expression(&'a self, i: &'a str) -> PResult<TotValue> {
+        delimited(
+            tag("("),
+            delimited(
+                |i: &'a str| self.all_ignored(i),
+                alt((
+                    |i: &'a str| self.math_exp(i),
+                    |i: &'a str| self.ref_exp(i),
+                    |i: &'a str| self.for_exp(i),
+                    |i: &'a str| self.gen_def_exp(i),
+                    |i: &'a str| self.gen_use_exp(i),
+                )),
+                |i: &'a str| self.all_ignored(i),
+            ),
+            tag(")"),
+        )(i)
+    }
+
+    fn math_exp(&self, i: &'a str) -> PResult<TotValue> {
+        todo!()
+    }
+
+    fn ref_exp(&self, i: &'a str) -> PResult<TotValue> {
+        todo!()
+    }
+
+    fn for_exp(&self, i: &'a str) -> PResult<TotValue> {
+        todo!()
+    }
+
+    fn gen_def_exp(&self, i: &'a str) -> PResult<TotValue> {
+        todo!()
+    }
+
+    fn gen_use_exp(&self, i: &'a str) -> PResult<TotValue> {
+        todo!()
+    }
+
+    fn scalar(&'a self, i: &'a str) -> PResult<TotValue> {
+        alt((
+            map(|i: &'a str| self.unit(i), |_| TotValue::Unit),
+            map(|i: &'a str| self.boolean(i), |v| TotValue::Boolean(v)),
+            map(|i: &'a str| self.number(i), |v| TotValue::Number(v)),
+            map(|i: &'a str| self.string(i), |v| TotValue::String(v)),
+            |i: &'a str| self.list(i),
+            |i: &'a str| self.dict(i),
+        ))(i)
+    }
+
+    fn key_value(&'a self, i: &'a str) -> PResult<(String, TotValue)> {
+        delimited(
+            |i: &'a str| self.all_ignored(i),
+            separated_pair(
+                |i: &'a str| self.key(i),
+                |i: &'a str| self.all_ignored(i),
+                |i: &'a str| self.scalar(i),
+            ),
+            |i: &'a str| self.all_ignored(i),
+        )(i)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum TotExpression<'a> {
+    Unit,
+    Ref {
+        name: &'a str,
+        accessors: Vec<&'a str>,
+    },
+    Add,
+    Sub,
+    Mul,
+    Div,
+    For,
+}
+
+type Result<T> = std::result::Result<T, Error>;
 pub type PResult<'a, T> = IResult<&'a str, T>;
 
 fn token(i: &str) -> PResult<&str> {
@@ -97,7 +302,7 @@ pub(crate) fn key(i: &str) -> PResult<String> {
     alt((map(string, String::from), map(token, String::from)))(i)
 }
 
-pub(crate) fn expression(i: &str) -> PResult<TotValue> {
+pub(crate) fn expression(i: &str) -> PResult<TotExpression> {
     todo!()
 }
 
@@ -121,12 +326,25 @@ fn key_value(i: &str) -> PResult<(String, TotValue)> {
     )(i)
 }
 
-pub fn parse(i: &str) -> Result<TotValue, Error> {
-    if let Ok((rem, v)) = dict_contents(i) {
+pub fn parse(i: &str) -> Result<TotValue> {
+    let parser = Parser::new();
+    if let Ok((rem, v)) = parser.dict_contents(i) {
         if rem.is_empty() {
             return Ok(v);
         }
     }
+
+    if let Ok((rem, v)) = parser.list(i) {
+        if rem.is_empty() {
+            return Ok(v);
+        }
+    }
+
+    // if let Ok((rem, v)) = dict_contents(i) {
+    //     if rem.is_empty() {
+    //         return Ok(v);
+    //     }
+    // }
 
     Err(Error::ParseError)
 }
