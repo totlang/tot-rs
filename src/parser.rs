@@ -6,11 +6,11 @@ use std::{
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_till, take_till1, take_until},
-    character::complete::multispace1,
-    combinator::{map, value},
-    multi::many0,
+    character::complete::{char, digit1, multispace1},
+    combinator::{map, map_res, not, opt, value},
+    multi::{many0, many1},
     number::complete::double,
-    sequence::{delimited, pair, separated_pair, tuple},
+    sequence::{delimited, pair, separated_pair, terminated, tuple},
     IResult,
 };
 
@@ -24,8 +24,10 @@ pub enum Error {
     UnitError(String),
     #[error("bool error {0}")]
     BoolError(String),
-    #[error("number error {0}")]
-    NumberError(String),
+    #[error("integer error {0}")]
+    IntegerError(String),
+    #[error("float error {0}")]
+    FloatError(String),
     #[error("string error {0}")]
     StringError(String),
     #[error("expression error {0}")]
@@ -41,7 +43,8 @@ pub enum TotValue {
     Unit,
     Boolean(bool),
     String(String),
-    Number(f64),
+    Integer(i64),
+    Float(f64),
     List(Vec<TotValue>),
     Dict(HashMap<String, TotValue>),
     Generator { name: String },
@@ -84,7 +87,26 @@ impl<'a> Parser<'a> {
         alt((value(true, tag("true")), value(false, tag("false"))))(i)
     }
 
-    pub(crate) fn number(&self, i: &'a str) -> PResult<f64> {
+    pub(crate) fn integer(&'a self, i: &'a str) -> PResult<i64> {
+        map_res(
+            terminated(
+                tuple((opt(char('-')), digit1)),
+                not(|i: &'a str| self.float(i)),
+            ),
+            |(sign, v): (Option<char>, &str)| match sign {
+                Some(sign) if sign == '-' => v
+                    .parse()
+                    .map(|parsed_int: i64| parsed_int * -1)
+                    .map_err(|_| Error::IntegerError(format!("Cannot parse {sign}{v}"))),
+                Some(sign) => Err(Error::IntegerError(format!("Unhandled sign {sign}"))),
+                None => v
+                    .parse()
+                    .map_err(|_| Error::IntegerError(format!("Cannot parse {v}"))),
+            },
+        )(i)
+    }
+
+    pub(crate) fn float(&self, i: &'a str) -> PResult<f64> {
         double(i)
     }
 
@@ -163,7 +185,6 @@ impl<'a> Parser<'a> {
                 alt((
                     |i: &'a str| self.math_exp(i),
                     |i: &'a str| self.ref_exp(i),
-                    |i: &'a str| self.for_exp(i),
                     |i: &'a str| self.gen_def_exp(i),
                     |i: &'a str| self.gen_use_exp(i),
                 )),
@@ -181,10 +202,6 @@ impl<'a> Parser<'a> {
         todo!()
     }
 
-    fn for_exp(&self, i: &'a str) -> PResult<TotValue> {
-        todo!()
-    }
-
     fn gen_def_exp(&self, i: &'a str) -> PResult<TotValue> {
         todo!()
     }
@@ -197,7 +214,8 @@ impl<'a> Parser<'a> {
         alt((
             map(|i: &'a str| self.unit(i), |_| TotValue::Unit),
             map(|i: &'a str| self.boolean(i), |v| TotValue::Boolean(v)),
-            map(|i: &'a str| self.number(i), |v| TotValue::Number(v)),
+            map(|i: &'a str| self.integer(i), |v| TotValue::Integer(v)),
+            map(|i: &'a str| self.float(i), |v| TotValue::Float(v)),
             map(|i: &'a str| self.string(i), |v| TotValue::String(v)),
             |i: &'a str| self.list(i),
             |i: &'a str| self.dict(i),
@@ -246,7 +264,23 @@ pub(crate) fn boolean(i: &str) -> PResult<bool> {
     alt((value(true, tag("true")), value(false, tag("false"))))(i)
 }
 
-pub(crate) fn number(i: &str) -> PResult<f64> {
+pub(crate) fn integer<'a>(i: &'a str) -> PResult<i64> {
+    map_res(
+        terminated(tuple((opt(char('-')), digit1)), not(|i: &'a str| float(i))),
+        |(sign, v): (Option<char>, &str)| match sign {
+            Some(sign) if sign == '-' => v
+                .parse()
+                .map(|parsed_int: i64| parsed_int * -1)
+                .map_err(|_| Error::IntegerError(format!("Cannot parse {sign}{v}"))),
+            Some(sign) => Err(Error::IntegerError(format!("Unhandled sign {sign}"))),
+            None => v
+                .parse()
+                .map_err(|_| Error::IntegerError(format!("Cannot parse {v}"))),
+        },
+    )(i)
+}
+
+pub(crate) fn float(i: &str) -> PResult<f64> {
     double(i)
 }
 
@@ -276,6 +310,13 @@ fn block_comment(i: &str) -> PResult<()> {
 pub(crate) fn all_ignored(i: &str) -> PResult<()> {
     map(
         many0(alt((line_comment, block_comment, comma, whitespace))),
+        |_| (),
+    )(i)
+}
+
+pub(crate) fn all_ignored1(i: &str) -> PResult<()> {
+    map(
+        many1(alt((line_comment, block_comment, comma, whitespace))),
         |_| (),
     )(i)
 }
@@ -311,7 +352,8 @@ fn scalar(i: &str) -> PResult<TotValue> {
     alt((
         map(unit, |_| TotValue::Unit),
         map(boolean, |v| TotValue::Boolean(v)),
-        map(number, |v| TotValue::Number(v)),
+        map(integer, |v| TotValue::Integer(v)),
+        map(float, |v| TotValue::Float(v)),
         map(string, |v| TotValue::String(v)),
         list,
         dict,
@@ -359,14 +401,14 @@ mod tests {
         if let TotValue::Dict(v) = parse("test 1").unwrap() {
             assert_eq!(
                 v.get_key_value("test").unwrap(),
-                (&"test".to_string(), &TotValue::Number(1.0))
+                (&"test".to_string(), &TotValue::Integer(1))
             );
         } else {
             assert!(false);
         }
 
         if let TotValue::Dict(v) = parse("test 1 blah true").unwrap() {
-            assert_eq!(v.get("test").unwrap(), &TotValue::Number(1.0));
+            assert_eq!(v.get("test").unwrap(), &TotValue::Integer(1));
             assert_eq!(v.get("blah").unwrap(), &TotValue::Boolean(true));
         } else {
             assert!(false);
@@ -383,7 +425,7 @@ dict {
         )
         .unwrap()
         {
-            assert_eq!(v.get("test").unwrap(), &TotValue::Number(1.0));
+            assert_eq!(v.get("test").unwrap(), &TotValue::Integer(1));
             assert_eq!(v.get("blah").unwrap(), &TotValue::Boolean(true));
             assert_eq!(
                 v.get("dict").unwrap(),
@@ -428,30 +470,36 @@ dict {
     }
 
     #[test]
-    fn test_number() {
-        let (_, par) = number("10").unwrap();
+    fn test_integer() {
+        let (_, par) = integer("10").unwrap();
+        assert_eq!(par, i64::from(10));
+
+        let (_, par) = integer("0").unwrap();
+        assert_eq!(par, i64::from(0));
+
+        let (_, par) = integer("10]").unwrap();
+        assert_eq!(par, i64::from(10));
+
+        assert!(integer("one").is_err());
+        assert!(integer("").is_err());
+    }
+
+    #[test]
+    fn test_float() {
+        let (_, par) = float("10.").unwrap();
         assert_eq!(par, f64::from(10));
 
-        let (_, par) = number("10.").unwrap();
+        let (_, par) = float("10.0").unwrap();
         assert_eq!(par, f64::from(10));
 
-        let (_, par) = number("10.0").unwrap();
-        assert_eq!(par, f64::from(10));
-
-        let (_, par) = number("0").unwrap();
-        assert_eq!(par, f64::from(0));
-
-        let (_, par) = number("0.1").unwrap();
+        let (_, par) = float("0.1").unwrap();
         assert_eq!(par, f64::from(0.1));
 
-        let (_, par) = number(".1").unwrap();
+        let (_, par) = float(".1").unwrap();
         assert_eq!(par, f64::from(0.1));
 
-        let (_, par) = number("10]").unwrap();
-        assert_eq!(par, f64::from(10));
-
-        assert!(number("one").is_err());
-        assert!(number("").is_err());
+        assert!(float("one").is_err());
+        assert!(float("").is_err());
     }
 
     #[test]
@@ -516,7 +564,7 @@ dict {
 
         let (rem, par) = list("[1]").unwrap();
         assert_eq!(rem, "");
-        assert_eq!(par, TotValue::List(vec![TotValue::Number(1.0)]));
+        assert_eq!(par, TotValue::List(vec![TotValue::Integer(1)]));
 
         let (rem, par) = list("[] blah []").unwrap();
         assert_eq!(rem, " blah []");
@@ -524,17 +572,17 @@ dict {
 
         let (rem, par) = list("[1] blah []").unwrap();
         assert_eq!(rem, " blah []");
-        assert_eq!(par, TotValue::List(vec![TotValue::Number(1.0)]));
+        assert_eq!(par, TotValue::List(vec![TotValue::Integer(1)]));
 
         let (rem, par) = list("[1, 2\n , /* inner comment */ 3.1 4] blah []").unwrap();
         assert_eq!(rem, " blah []");
         assert_eq!(
             par,
             TotValue::List(vec![
-                TotValue::Number(1.0),
-                TotValue::Number(2.0),
-                TotValue::Number(3.1),
-                TotValue::Number(4.0)
+                TotValue::Integer(1),
+                TotValue::Integer(2),
+                TotValue::Float(3.1),
+                TotValue::Integer(4)
             ])
         );
 
@@ -573,7 +621,7 @@ dict {
                 map.insert("hello".to_string(), TotValue::String("world".to_string()));
                 map.insert(
                     "inner-list".to_string(),
-                    TotValue::List(vec![TotValue::Boolean(true), TotValue::Number(10.0)]),
+                    TotValue::List(vec![TotValue::Boolean(true), TotValue::Integer(10)]),
                 );
 
                 map
@@ -606,7 +654,7 @@ dict {
         assert_eq!(par, TotValue::Boolean(true));
 
         let (_, par) = scalar("1").unwrap();
-        assert_eq!(par, TotValue::Number(1.0));
+        assert_eq!(par, TotValue::Integer(1));
 
         let (_, par) = scalar("\"hello\"").unwrap();
         assert_eq!(par, TotValue::String("hello".to_string()));
@@ -627,7 +675,7 @@ dict {
 
         let (_, par) = key_value("hello 10").unwrap();
         assert_eq!(par.0, "hello");
-        assert_eq!(par.1, TotValue::Number(10.0));
+        assert_eq!(par.1, TotValue::Integer(10));
 
         let (_, par) = key_value("hello \"world\"").unwrap();
         assert_eq!(par.0, "hello");
@@ -638,7 +686,7 @@ dict {
         assert_eq!(
             par.1,
             TotValue::List(vec![
-                TotValue::Number(0.0),
+                TotValue::Integer(0),
                 TotValue::Boolean(true),
                 TotValue::List(vec![TotValue::String("hello".to_string())])
             ])

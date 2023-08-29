@@ -57,9 +57,17 @@ impl<'de> Deserializer<'de> {
         Ok(par)
     }
 
-    fn parse_number(&mut self) -> Result<f64> {
+    fn parse_integer(&mut self) -> Result<i64> {
         let (rem, par) =
-            parser::number(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
+            parser::integer(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
+
+        self.input = rem;
+
+        Ok(par)
+    }
+
+    fn parse_float(&mut self) -> Result<f64> {
+        let (rem, par) = parser::float(self.input).map_err(|e| Error::SerdeError(e.to_string()))?;
 
         self.input = rem;
 
@@ -126,21 +134,21 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_i8(i8::try_from(self.parse_number()?.round() as i64)?)
+        visitor.visit_i8(i8::try_from(self.parse_integer()? as i64)?)
     }
 
     fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_i16(i16::try_from(self.parse_number()?.round() as i64)?)
+        visitor.visit_i16(i16::try_from(self.parse_integer()? as i64)?)
     }
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_i32(i32::try_from(self.parse_number()?.round() as i64)?)
+        visitor.visit_i32(i32::try_from(self.parse_integer()? as i64)?)
     }
 
     // TODO: this less fallible than smaller integers because we do a raw cast to i64
@@ -148,28 +156,28 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_i64(self.parse_number()?.round() as i64)
+        visitor.visit_i64(self.parse_integer()? as i64)
     }
 
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_u8(u8::try_from(self.parse_number()?.round() as u64)?)
+        visitor.visit_u8(u8::try_from(self.parse_integer()? as u64)?)
     }
 
     fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_u16(u16::try_from(self.parse_number()?.round() as u64)?)
+        visitor.visit_u16(u16::try_from(self.parse_integer()? as u64)?)
     }
 
     fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_u32(u32::try_from(self.parse_number()?.round() as u64)?)
+        visitor.visit_u32(u32::try_from(self.parse_integer()? as u64)?)
     }
 
     // TODO: this less fallible than smaller integers because we do a raw cast to u64
@@ -177,21 +185,21 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_u64(self.parse_number()?.round() as u64)
+        visitor.visit_u64(self.parse_integer()? as u64)
     }
 
     fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_f32(self.parse_number()? as f32)
+        visitor.visit_f32(self.parse_float()? as f32)
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        visitor.visit_f64(self.parse_number()?)
+        visitor.visit_f64(self.parse_float()?)
     }
 
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
@@ -786,9 +794,15 @@ mod tests {
         }
 
         #[test]
-        fn test_number_float() {
+        fn test_integer() {
+            let mut de = de("1");
+            assert_eq!(de.parse_integer().unwrap(), 1);
+        }
+
+        #[test]
+        fn test_float() {
             let mut de = de("1.0");
-            assert_eq!(de.parse_number().unwrap(), 1.0);
+            assert_eq!(de.parse_float().unwrap(), 1.0);
         }
 
         #[test]
@@ -871,19 +885,12 @@ mod tests {
                     9223372036854775807
                 );
                 assert_eq!(
-                    from_str::<i64>("-9223372036854775808").unwrap(),
-                    -9223372036854775808
+                    from_str::<i64>("-9223372036854775807").unwrap(),
+                    -9223372036854775807
                 );
 
                 assert!(from_str::<i64>("true").is_err());
-            }
-
-            #[test]
-            fn test_de_i64_truncate() {
-                assert_eq!(
-                    from_str::<i64>("9223372036854775809").unwrap(),
-                    9223372036854775807
-                );
+                assert!(from_str::<i64>("9223372036854775808").is_err());
             }
         }
 
